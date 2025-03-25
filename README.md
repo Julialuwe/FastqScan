@@ -23,7 +23,7 @@ The metrics are reported to STDOUT in a JSON format.
 Summarize single-end sequencing:
 
 ```shell
-cargo run -- -1 data/example.R1.fastq.gz -
+cargo run -- -1 data/example.R1.fastq.gz
 ```
 
 Summarize paired-end sequencing:
