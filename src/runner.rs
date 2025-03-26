@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+/*use std::io::{self, BufRead};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FastqRecord {
@@ -78,3 +78,4 @@ impl WorkflowRunner {
         self.statistics
     }
 }
+*/
