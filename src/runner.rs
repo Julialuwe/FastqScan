@@ -138,3 +138,47 @@ impl WorkflowRunner {
         self.statistics
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_quality_statistic_on_example() {
+        let record = FastqRecord {
+            seq: b"AGTC".to_vec(),
+            qual: b"IIII".to_vec(), // 'I' = Phred 40
+        };
+
+        let mut stat = ReadQualityStatistic::default();
+        stat.process(&record);
+
+        assert_eq!(stat.read_count, 1);
+        assert_eq!(stat.total_quality, 40.0);
+    }
+
+    #[test]
+    fn test_parse_record_reads_correct_fields() {
+        use std::io::BufReader;
+
+        // Small FASTQ-Block
+        let fastq_data = b"@SEQ_ID\nAGTC\n+\nIIII\n";
+        let mut reader = BufReader::new(&fastq_data[..]);
+
+        let mut record = FastqRecord::default();
+        let result = WorkflowRunner::parse_record(&mut reader, &mut record);
+
+        // Should be ok
+        assert!(result.is_ok());
+
+        // Sequence correct?
+        assert_eq!(record.seq, b"AGTC");
+
+        // Quality correct?
+        assert_eq!(record.qual, b"IIII");
+    }
+
+  
+
+}
