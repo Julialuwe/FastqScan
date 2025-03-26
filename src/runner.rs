@@ -1,5 +1,8 @@
 use std::io::{self, BufRead};
 
+use flate2::read;
+use std::any::Any;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FastqRecord {
     seq: Vec<u8>,
@@ -15,6 +18,8 @@ pub trait Statistic {
      */
 
     fn process(&mut self, record: &FastqRecord);
+    fn as_any(&self) -> &dyn Any;
+
 
     // TODO - find a way to represent the results.
     // Let's try to identify the shared parts of *any* statistic
@@ -31,16 +36,38 @@ impl Statistic for BaseQualityPosStatistic {
     fn process(&mut self, record: &FastqRecord) {
         todo!()
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
 }
 
 /// Computes mean base quality for a read.
 pub struct ReadQualityStatistic {
+    pub total_quality: f64,
+    pub read_count: usize,
+}
 
+impl Default for  ReadQualityStatistic {
+    fn default() -> Self {
+        Self { 
+            total_quality: 0.0, 
+            read_count: 0, 
+        }
+    }
 }
 
 impl Statistic for ReadQualityStatistic {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }    
     fn process(&mut self, record: &FastqRecord) {
-        todo!()
+        let read_quality: f64 = record.qual
+            .iter()
+            .map(|&q| (q - 33) as f64) // Phred-Recalculation
+            .sum::<f64>() / record.qual.len() as f64;
+        self.total_quality += read_quality;
+        self.read_count += 1;
     }
 }
 
