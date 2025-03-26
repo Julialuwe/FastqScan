@@ -10,6 +10,7 @@ use runner::{FastqRecord, ReadQualityStatistic, WorkflowRunner};
 use io_utils::open_fastq;
 use std::process;
 use std::any::Any;
+use serde_json::json;
 
 fn main() {
     let args = CliArgs::parse();
@@ -45,12 +46,19 @@ fn main() {
 
     // show Statistic-Results (single- and paired-end)
     let stats = runner.finalize();
+    let mut json_output = serde_json::Map::new();
+
     for stat in stats {
-        if let Some(read_q) = stat.as_any().downcast_ref::<ReadQualityStatistic>() {
-            let avg = read_q.total_quality / read_q.read_count as f64;
-            println!("Average Read-Quality: {:.2}", avg);
+        let value = stat.report_json();
+        if let Some(obj) = value.as_object() {
+            for (k, v) in obj {
+                json_output.insert(k.clone(), v.clone());
+            }
         }
     }
+
+    println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+
 
     println!("Parsing done!");
 }

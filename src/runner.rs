@@ -2,6 +2,7 @@ use std::io::{self, BufRead};
 
 use flate2::read;
 use std::any::Any;
+use serde_json::json;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FastqRecord {
@@ -19,6 +20,7 @@ pub trait Statistic {
 
     fn process(&mut self, record: &FastqRecord);
     fn as_any(&self) -> &dyn Any;
+    fn report_json(&self) -> serde_json::Value;
 
 
     // TODO - find a way to represent the results.
@@ -29,18 +31,42 @@ pub trait Statistic {
 
 /// Computes mean base quality for a position read.
 pub struct BaseQualityPosStatistic {
-    
+    pub total_qualities: Vec<f64>,
+    pub counts: Vec<usize>,
 }
 
-impl Statistic for BaseQualityPosStatistic {
-    fn process(&mut self, record: &FastqRecord) {
-        todo!()
+impl Default for BaseQualityPosStatistic {
+    fn default() -> Self {
+        Self {
+            total_qualities: Vec::new(),
+            counts: Vec::new(),
+        }
     }
-    fn as_any(&self) -> &dyn std::any::Any {
+}
+
+
+/*impl Statistic for BaseQualityPosStatistic {
+    fn process(&mut self, record: &FastqRecord) {
+        let len = record.qual.len();
+
+        // Bei Bedarf Vektoren erweitern
+        if self.total_qualities.len() < len {
+            self.total_qualities.resize(len, 0.0);
+            self.counts.resize(len, 0);
+        }
+
+        for (i, &q) in record.qual.iter().enumerate() {
+            let phred = (q - 33) as f64;
+            self.total_qualities[i] += phred;
+            self.counts[i] += 1;
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
         self
     }
-    
-}
+}*/
+
 
 /// Computes mean base quality for a read.
 pub struct ReadQualityStatistic {
@@ -58,18 +84,33 @@ impl Default for  ReadQualityStatistic {
 }
 
 impl Statistic for ReadQualityStatistic {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }    
     fn process(&mut self, record: &FastqRecord) {
         let read_quality: f64 = record.qual
             .iter()
-            .map(|&q| (q - 33) as f64) // Phred-Recalculation
+            .map(|&q| (q - 33) as f64)
             .sum::<f64>() / record.qual.len() as f64;
+
         self.total_quality += read_quality;
         self.read_count += 1;
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn report_json(&self) -> serde_json::Value {
+        let average = if self.read_count > 0 {
+            self.total_quality / self.read_count as f64
+        } else {
+            0.0
+        };
+
+        json!({
+            "average_read_quality": average
+        })
+    }
 }
+
 
 pub struct WorkflowRunner {
     pub statistics: Vec<Box<dyn Statistic>>,
