@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::{default, io::{self, BufRead}};
 
 use flate2::read;
 use std::any::Any;
@@ -29,7 +29,60 @@ pub trait Statistic {
     // fn report(self) -> ?
 }
 
+/// Computes average G/C content per read position
+pub struct GcContentPerPosition {
+    gc_counts: Vec<usize>, 
+    total_counts: Vec<usize>,
+}
 
+impl Default for GcContentPerPosition {
+    fn default() -> Self {
+        Self { 
+            gc_counts: Vec::new(),
+            total_counts: Vec::new(),
+        }
+    }
+}
+
+impl Statistic for GcContentPerPosition {
+    fn process(&mut self, record: &FastqRecord) {
+        let len = record.seq.len();
+
+        if self.gc_counts.len() < len {
+            self.gc_counts.resize(len, 0);
+            self.total_counts.resize(len, 0);
+        }
+
+        for (i, &base) in record.seq.iter().enumerate() {
+            if base == b'G' || base == b'C' {
+                self.gc_counts[i] += 1;
+            }
+            self.total_counts[i] += 1;
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn report_json(&self) -> serde_json::Value {
+        let gc_per_position: Vec<f64> = self.gc_counts.iter()
+            .zip(self.total_counts.iter())
+            .map(|(&gc, &total)| {
+                if total > 0 {
+                    gc as f64 / total as f64
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+    
+        json!({
+            "average_gc_content_per_position": gc_per_position
+        })
+    }
+    
+}
 /// Computes average proportions of {A, C, G, T, N} for each read position
 pub struct BaseCompositionStatistic {
     base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
