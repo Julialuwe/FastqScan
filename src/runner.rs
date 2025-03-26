@@ -29,6 +29,68 @@ pub trait Statistic {
     // fn report(self) -> ?
 }
 
+
+/// Computes average proportions of {A, C, G, T, N} for each read position
+pub struct BaseCompositionStatistic {
+    base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
+}
+
+impl Default for BaseCompositionStatistic {
+    fn default() -> Self {
+        Self {
+            base_counts: Vec::new(),
+        }
+    }
+}
+
+impl Statistic for BaseCompositionStatistic {
+    fn process(&mut self, record: &FastqRecord) {
+        let len = record.seq.len();
+        if self.base_counts.len() < len {
+            self.base_counts.resize(len, [0; 5]);
+        }
+
+        for (i, &base) in record.seq.iter().enumerate() {
+            let idx = match base {
+                b'A' => 0,
+                b'C' => 1,
+                b'G' => 2,
+                b'T' => 3,
+                _ => 4, // N or others
+            };
+            self.base_counts[i][idx] += 1;
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn report_json(&self) -> serde_json::Value {
+        let proportions: Vec<_> = self.base_counts.iter().map(|counts| {
+            let total: usize = counts.iter().sum();
+            if total == 0 {
+                json!({"A":0.0,"C":0.0,"G":0.0,"T":0.0,"N":0.0})
+            } else {
+                json!({
+                    "A": counts[0] as f64 / total as f64,
+                    "C": counts[1] as f64 / total as f64,
+                    "G": counts[2] as f64 / total as f64,
+                    "T": counts[3] as f64 / total as f64,
+                    "N": counts[4] as f64 / total as f64,
+                })
+            }
+        }).collect();
+
+        json!({
+            "base_composition_per_position": proportions
+        })
+    }
+}
+
+
+
+
 /// Computes mean base quality for a position read.
 pub struct BaseQualityPosStatistic {
     pub total_qualities: Vec<f64>,
@@ -259,7 +321,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_base_composition_statistic() {
+        let record = FastqRecord {
+            seq: b"ACGT".to_vec(),
+            qual: b"!!!!".to_vec(), // irrelevant hier
+        };
 
-  
+        let mut stat = BaseCompositionStatistic::default();
+        stat.process(&record);
+
+        let json = stat.report_json();
+        let result = json.get("base_composition_per_position").unwrap();
+        let array = result.as_array().unwrap();
+
+        let expected_bases = ["A", "C", "G", "T"];
+
+        for (i, expected_base) in expected_bases.iter().enumerate() {
+            let position_counts = &array[i];
+            let freq = position_counts.get(*expected_base).unwrap().as_f64().unwrap();
+            assert!((freq - 1.0).abs() < 1e-6, "Base {} at position {} was not 100%", expected_base, i);
+        }
+
+        // Check that other bases are 0.0
+        for (i, expected_base) in expected_bases.iter().enumerate() {
+            let position_counts = &array[i];
+            for other_base in ["A", "C", "G", "T", "N"] {
+                if other_base != *expected_base {
+                    let freq = position_counts.get(other_base).unwrap().as_f64().unwrap();
+                    assert!(freq.abs() < 1e-6, "Unexpected non-zero value for base {} at position {}", other_base, i);
+                }
+            }
+        }
+    }
+
+    
 
 }
