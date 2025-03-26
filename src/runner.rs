@@ -44,12 +44,10 @@ impl Default for BaseQualityPosStatistic {
     }
 }
 
-
-/*impl Statistic for BaseQualityPosStatistic {
+impl Statistic for BaseQualityPosStatistic {
     fn process(&mut self, record: &FastqRecord) {
         let len = record.qual.len();
 
-        // Bei Bedarf Vektoren erweitern
         if self.total_qualities.len() < len {
             self.total_qualities.resize(len, 0.0);
             self.counts.resize(len, 0);
@@ -65,7 +63,26 @@ impl Default for BaseQualityPosStatistic {
     fn as_any(&self) -> &dyn Any {
         self
     }
-}*/
+
+    fn report_json(&self) -> serde_json::Value {
+        let averages: Vec<f64> = self.total_qualities
+            .iter()
+            .zip(self.counts.iter())
+            .map(|(&sum, &count)| {
+                if count > 0 {
+                    sum / count as f64
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+
+        serde_json::json!({
+            "average_base_quality_per_position": averages
+        })
+    }
+}
+
 
 
 /// Computes mean base quality for a read.
@@ -219,6 +236,29 @@ mod tests {
         // Quality correct?
         assert_eq!(record.qual, b"IIII");
     }
+
+    #[test]
+    fn test_base_quality_pos_statistic() {
+        let record = FastqRecord {
+            seq: b"AGTC".to_vec(),
+            qual: b"IIII".to_vec(), // 'I' = ASCII 73 -> Phred 40
+        };
+
+        let mut stat = BaseQualityPosStatistic::default();
+        stat.process(&record);
+
+        let expected = vec![40.0, 40.0, 40.0, 40.0];
+
+        let json = stat.report_json();
+        let result = json.get("average_base_quality_per_position").unwrap();
+        let result_array = result.as_array().unwrap();
+
+        for (i, val) in result_array.iter().enumerate() {
+            let observed = val.as_f64().unwrap();
+            assert!((observed - expected[i]).abs() < 1e-6, "Mismatch at position {}: got {}, expected {}", i, observed, expected[i]);
+        }
+    }
+
 
   
 

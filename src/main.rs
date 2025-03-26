@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::BufReader;
 use clap::Parser;
 use cli::CliArgs;
-use runner::{FastqRecord, ReadQualityStatistic, WorkflowRunner};
+use runner::{FastqRecord, ReadQualityStatistic, WorkflowRunner, BaseQualityPosStatistic};
 use io_utils::open_fastq;
 use std::process;
 use std::any::Any;
@@ -27,6 +27,8 @@ fn main() {
     // init Runner and register statistics 
     let mut runner = WorkflowRunner::new();
     runner.statistics.push(Box::new(ReadQualityStatistic::default()));
+    runner.statistics.push(Box::new(BaseQualityPosStatistic::default()));
+
 
     // Processing File 1 
     runner.process(reader1);
