@@ -1,4 +1,4 @@
-/*use std::io::{self, BufRead};
+use std::io::{self, BufRead};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FastqRecord {
@@ -45,7 +45,7 @@ impl Statistic for ReadQualityStatistic {
 }
 
 pub struct WorkflowRunner {
-    statistics: Vec<Box<dyn Statistic>>,
+    pub statistics: Vec<Box<dyn Statistic>>,
 }
 
 impl WorkflowRunner {
@@ -70,7 +70,35 @@ impl WorkflowRunner {
     where
         R: BufRead,
     {
-        unimplemented!() // TODO: implement
+        let mut buffer = String::new();
+
+        // Line 1 --> @SEQ_ID (ignoring for now)
+        buffer.clear();
+        if read.read_line(&mut buffer)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF before read ID"));
+        }
+        
+        // Line 2 --> Sequence
+        buffer.clear();
+        if read.read_line(&mut buffer)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF before sequence"));
+        }
+        record.seq = buffer.trim_end().as_bytes().to_vec();
+
+        // Line 3 --> +
+        buffer.clear();
+        if read.read_line(&mut buffer)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF before + line"));
+        }
+
+        // Line 4 --> Quality
+        buffer.clear();
+        if read.read_line(&mut buffer)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF before quality"));
+        }
+        record.qual = buffer.trim_end().as_bytes().to_vec();
+
+        Ok(())
     }
 
     pub fn finalize(self) -> Vec<Box<dyn Statistic>> {
@@ -78,4 +106,3 @@ impl WorkflowRunner {
         self.statistics
     }
 }
-*/
