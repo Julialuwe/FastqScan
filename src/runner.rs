@@ -52,6 +52,11 @@ impl WorkflowRunner {
     /// Process the FASTQ file.
     ///
     /// Can return an I/O error or other errors (not in the signature at this point)
+    pub fn new() -> Self {
+        Self {
+            statistics: Vec::new(),
+        }
+    }
     pub fn process<R>(&mut self, mut read: R)
     where
         R: BufRead,
