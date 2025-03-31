@@ -5,7 +5,7 @@ mod reporting;
 
 use clap::Parser;
 use cli::CliArgs;
-use runner::WorkflowRunner;
+use runner::{WorkflowRunner, StatisticType};
 use io_utils::open_fastq;
 use serde_json::Value;
 use std::{io::BufReader, process};
@@ -39,8 +39,21 @@ fn main() {
         readers.push(reader2);
     }
 
+    let selected = vec![
+    StatisticType::ReadQuality,
+    StatisticType::BaseQualityPos,
+    StatisticType::BaseComposition,
+    StatisticType::GcContentPos,
+    StatisticType::GcContentRead,
+    StatisticType::BaseCompositionRead,
+    ];
+
     for reader in readers {
-        let mut runner = WorkflowRunner::with_default_statistics();
+
+        
+        //let mut runner = WorkflowRunner::with_default_statistics();
+        let mut runner = WorkflowRunner::from_selected_statistics(&selected);
+
         runner.process(reader);
         // show Statistic-Results (single- and paired-end)
         let stats = runner.finalize();

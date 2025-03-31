@@ -425,6 +425,16 @@ pub struct WorkflowRunner {
     pub statistics: Vec<StatisticWrapper>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatisticType {
+    ReadQuality,
+    BaseQualityPos,
+    BaseComposition,
+    GcContentPos,
+    GcContentRead,
+    BaseCompositionRead,
+}
+
 impl WorkflowRunner { // Default ?
     /// Process the FASTQ file.
     ///
@@ -434,13 +444,32 @@ impl WorkflowRunner { // Default ?
             statistics: Vec::new(),
         }
     }
-    
+
     fn wrap<T: 'static + Statistic + Report>(instance: T) -> StatisticWrapper {
         let shared = Rc::new(RefCell::new(instance));
         StatisticWrapper {
             statistic: Box::new(RcStatistic(shared.clone())),
             reporter: Box::new(RcReporter(shared)),
         }
+    }
+
+    /// Creates a runner with only the selected statistics
+    pub fn from_selected_statistics(selected: &[StatisticType]) -> Self {
+        let mut runner = Self::new();
+
+        runner.statistics = selected
+            .iter()
+            .map(|s| match s {
+                StatisticType::ReadQuality => Self::wrap(ReadQualityStatistic::default()),
+                StatisticType::BaseQualityPos => Self::wrap(BaseQualityPosStatistic::default()),
+                StatisticType::BaseComposition => Self::wrap(BaseCompositionStatistic::default()),
+                StatisticType::GcContentPos => Self::wrap(GcContentPerPosition::default()),
+                StatisticType::GcContentRead => Self::wrap(GcContentPerRead::default()),
+                StatisticType::BaseCompositionRead => Self::wrap(BaseCompositionPerRead::default()),
+            })
+            .collect();
+
+        runner
     }
 
     pub fn with_default_statistics() -> Self {
