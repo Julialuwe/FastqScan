@@ -16,7 +16,7 @@ pub struct FastqRecord {
 wrapper structs:
 - allow sharing single instance of a statistic for Statistics and Report
 - without duplicating the underlying data
-//
+
 - Statistic::process` requires mutable access  
 - `Report::report_json` requires shared (immutable) access
 --> `Rc<RefCell<T>>` to enable interior mutability and shared ownership
@@ -63,8 +63,6 @@ pub trait Statistic {
      */
 
     fn process(&mut self, record: &FastqRecord);
-
-
     // TODO - find a way to represent the results.
     // Let's try to identify the shared parts of *any* statistic
     // and report these in some fashion.
@@ -132,15 +130,6 @@ pub struct GcContentPerRead {
     counts: usize,
 }
 
-impl Default for GcContentPerRead {
-    fn default() -> Self {
-        Self { 
-            gc_percent: 0.0,
-            counts: 0,
-        }
-    }
-}
-
 impl Statistic for GcContentPerRead {
     fn process(&mut self, record: &FastqRecord) {
         let gc_count = record.seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
@@ -176,14 +165,6 @@ pub struct GcContentPerPosition {
     total_counts: Vec<usize>,
 }
 
-impl Default for GcContentPerPosition {
-    fn default() -> Self {
-        Self { 
-            gc_counts: Vec::new(),
-            total_counts: Vec::new(),
-        }
-    }
-}
 
 impl Statistic for GcContentPerPosition {
     fn process(&mut self, record: &FastqRecord) {
@@ -225,14 +206,6 @@ impl Report for GcContentPerPosition {
 /// Computes average proportions of {A, C, G, T, N} for each read position
 pub struct BaseCompositionStatistic {
     base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
-}
-
-impl Default for BaseCompositionStatistic {
-    fn default() -> Self {
-        Self {
-            base_counts: Vec::new(),
-        }
-    }
 }
 
 impl Statistic for BaseCompositionStatistic {
@@ -286,15 +259,6 @@ pub struct BaseQualityPosStatistic {
     pub counts: Vec<usize>,
 }
 
-impl Default for BaseQualityPosStatistic {
-    fn default() -> Self {
-        Self {
-            total_qualities: Vec::new(),
-            counts: Vec::new(),
-        }
-    }
-}
-
 impl Statistic for BaseQualityPosStatistic {
     fn process(&mut self, record: &FastqRecord) {
         let len = record.qual.len();
@@ -338,14 +302,6 @@ pub struct ReadQualityStatistic {
     pub read_count: usize,
 }
 
-impl Default for  ReadQualityStatistic {
-    fn default() -> Self {
-        Self { 
-            total_quality: 0.0, 
-            read_count: 0, 
-        }
-    }
-}
 
 impl Statistic for ReadQualityStatistic {
     fn process(&mut self, record: &FastqRecord) {
