@@ -1,6 +1,5 @@
-use std::{default, io::{self, BufRead}};
+use std::io::{self, BufRead};
 
-use flate2::read;
 use serde_json::json;
 use std::rc::Rc;
 use std::cell::RefCell;

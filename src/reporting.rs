@@ -100,7 +100,7 @@ pub fn print_combined_table(json: &Value) {
         .with(Style::modern())
         .with(Modify::new(Segment::all()).with(Format::content(|s| s.to_string())));
 
-    println!("\n📊 Combined Per-Position Statistics Table:\n");
+    println!("\nStatistics Table:\n");
     println!("{table}");
 
 }

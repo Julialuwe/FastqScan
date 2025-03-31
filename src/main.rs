@@ -7,7 +7,7 @@ use clap::Parser;
 use cli::CliArgs;
 use runner::WorkflowRunner;
 use io_utils::open_fastq;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::process;
 
 
