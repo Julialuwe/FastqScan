@@ -3,6 +3,7 @@ use std::io::{self, BufRead};
 use serde_json::json;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -111,174 +112,91 @@ pub trait Report {
 }
 
 
-/// Conputes distribution of lengths of the individual reads (similar to BaseCompositionStatistics)
 
-pub struct BaseCompositionPerRead {
-    total_counts: [f64; 5],
-    read_count: usize,
+/// 1. average base quality (Phred) 
+/// --> Sequenzqualität (pro Base)
+#[derive(Default)]
+pub struct BaseQualityPosStatistic {
+    pub total_qualities: Vec<f64>,
+    pub counts: Vec<usize>,
 }
 
-impl Default for BaseCompositionPerRead {
-    fn default() -> Self {
-        Self {
-            total_counts: [0.0; 5],
-            read_count: 0, 
-        }
-    }
-} 
-
-impl Statistic for BaseCompositionPerRead {
+impl Statistic for BaseQualityPosStatistic {
     fn process(&mut self, record: &FastqRecord) {
-        let mut counts = [0usize; 5];
-        for &base in &record.seq {
-            let idx = match base {
-                b'A' => 0,
-                b'C' => 1,
-                b'G' => 2,
-                b'T' => 3,
-                _ => 4, // N or other
-            };
-            counts[idx] += 1;
+        let len = record.qual.len();
+
+        if self.total_qualities.len() < len {
+            self.total_qualities.resize(len, 0.0);
+            self.counts.resize(len, 0);
         }
 
-        let len = record.seq.len();
-        if len > 0 {
-            for i in 0..5 {
-                self.total_counts[i] += counts[i] as f64 / len as f64;
-            }
-            self.read_count += 1;
+        for (i, &q) in record.qual.iter().enumerate() {
+            let phred = (q - 33) as f64;
+            self.total_qualities[i] += phred;
+            self.counts[i] += 1;
         }
     }
 }
 
-impl Report for BaseCompositionPerRead {
+impl Report for BaseQualityPosStatistic {
     fn report_json(&self) -> serde_json::Value {
-        let bases = ["A", "C", "G", "T", "N"];
-        let mut composition = serde_json::Map::new();
-
-        for (i, &base) in bases.iter().enumerate() {
-            let avg = if self.read_count > 0 {
-                self.total_counts[i] / self.read_count as f64
-            } else {
-                0.0
-            };
-            composition.insert(base.to_string(), json!(avg));
-        }
-
-        json!({
-            "average_base_composition_per_read": composition
-        })
-    }
-}
-
-/// Computes average G/C content per read position
-pub struct GcContentPerRead {
-    gc_percent: f64, 
-    counts: usize,
-}
-
-impl Default for GcContentPerRead {
-    fn default() -> Self {
-        Self {
-            gc_percent: 0.0,
-            counts: 0, 
-        }
-    }
-} 
-
-impl Statistic for GcContentPerRead {
-    fn process(&mut self, record: &FastqRecord) {
-        let gc_count = record.seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
-        let len = record.seq.len();
-
-        if len > 0 {
-            let fraction = gc_count as f64 / len as f64;
-            self.gc_percent += fraction;
-            self.counts += 1;
-        }
-        
-    }
-}
-
-impl Report for GcContentPerRead {
-    fn report_json(&self) -> serde_json::Value {
-        let average_gc = if self.counts > 0 {
-            self.gc_percent / self.counts as f64
-        } else {
-            0.0
-        };
-
-        json!({
-            "average_gc_content_per_read": average_gc
-        })
-    }
-}
-
-
-/// Computes average G/C content per read position
-pub struct GcContentPerPosition {
-    gc_counts: Vec<usize>, 
-    total_counts: Vec<usize>,
-}
-
-impl Default for GcContentPerPosition {
-    fn default() -> Self {
-        Self {
-            gc_counts: Vec::new(),
-            total_counts: Vec::new(), 
-        }
-    }
-} 
-    
-
-impl Statistic for GcContentPerPosition {
-    fn process(&mut self, record: &FastqRecord) {
-        let len = record.seq.len();
-
-        if self.gc_counts.len() < len {
-            self.gc_counts.resize(len, 0);
-            self.total_counts.resize(len, 0);
-        }
-
-        for (i, &base) in record.seq.iter().enumerate() {
-            if base == b'G' || base == b'C' {
-                self.gc_counts[i] += 1;
-            }
-            self.total_counts[i] += 1;
-        }
-    }
-}
-
-impl Report for GcContentPerPosition {
-    fn report_json(&self) -> serde_json::Value {
-        let gc_per_position: Vec<f64> = self.gc_counts.iter()
-            .zip(self.total_counts.iter())
-            .map(|(&gc, &total)| {
-                if total > 0 {
-                    gc as f64 / total as f64
+        let averages: Vec<f64> = self.total_qualities
+            .iter()
+            .zip(self.counts.iter())
+            .map(|(&sum, &count)| {
+                if count > 0 {
+                    sum / count as f64
                 } else {
                     0.0
                 }
             })
             .collect();
-    
-        json!({
-            "average_gc_content_per_position": gc_per_position
+
+        serde_json::json!({
+            "average_base_quality_per_position": averages
         })
     }
 }
 
-/// Computes average proportions of {A, C, G, T, N} for each read position
-pub struct BaseCompositionStatistic {
-    base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
+/// 2. average quality of all reads
+/// --> Sequenzqualität (pro Sequenz)
+#[derive(Default)]
+pub struct ReadQualityStatistic {
+    pub total_quality: f64,
+    pub read_count: usize,
 }
 
-impl Default for BaseCompositionStatistic {
-    fn default() -> Self {
-        Self {
-            base_counts: Vec::new(),
-        }
+impl Statistic for ReadQualityStatistic {
+    fn process(&mut self, record: &FastqRecord) {
+        let read_quality: f64 = record.qual
+            .iter()
+            .map(|&q| (q - 33) as f64)
+            .sum::<f64>() / record.qual.len() as f64;
+
+        self.total_quality += read_quality;
+        self.read_count += 1;
     }
+}
+
+impl Report for ReadQualityStatistic {
+    fn report_json(&self) -> serde_json::Value {
+        let average = if self.read_count > 0 {
+            self.total_quality / self.read_count as f64
+        } else {
+            0.0
+        };
+
+        json!({
+            "average_read_quality": average
+        })
+    }
+}
+
+/// 3. average proportions of {A, C, G, T, N} for each read position
+/// --> Sequenzidentität (pro Base)
+#[derive(Default)]
+pub struct BaseCompositionStatistic {
+    base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
 }
 
 impl Statistic for BaseCompositionStatistic {
@@ -324,99 +242,120 @@ impl Report for BaseCompositionStatistic {
     }
 }
 
+/// 4. average G/C content per read position
+/// --> GC-Gehalt (pro Base)
+#[derive(Default)]
+pub struct GcContentPerPosition {
+    gc_counts: Vec<usize>, 
+    total_counts: Vec<usize>,
+}   
 
-
-/// Computes mean base quality for a position read.
-pub struct BaseQualityPosStatistic {
-    pub total_qualities: Vec<f64>,
-    pub counts: Vec<usize>,
-}
-
-impl Default for BaseQualityPosStatistic {
-    fn default() -> Self {
-        Self {
-            total_qualities: Vec::new(),
-            counts: Vec::new(), 
-        }
-    }
-} 
-
-impl Statistic for BaseQualityPosStatistic {
+impl Statistic for GcContentPerPosition {
     fn process(&mut self, record: &FastqRecord) {
-        let len = record.qual.len();
+        let len = record.seq.len();
 
-        if self.total_qualities.len() < len {
-            self.total_qualities.resize(len, 0.0);
-            self.counts.resize(len, 0);
+        if self.gc_counts.len() < len {
+            self.gc_counts.resize(len, 0);
+            self.total_counts.resize(len, 0);
         }
 
-        for (i, &q) in record.qual.iter().enumerate() {
-            let phred = (q - 33) as f64;
-            self.total_qualities[i] += phred;
-            self.counts[i] += 1;
+        for (i, &base) in record.seq.iter().enumerate() {
+            if base == b'G' || base == b'C' {
+                self.gc_counts[i] += 1;
+            }
+            self.total_counts[i] += 1;
         }
     }
 }
 
-impl Report for BaseQualityPosStatistic {
+impl Report for GcContentPerPosition {
     fn report_json(&self) -> serde_json::Value {
-        let averages: Vec<f64> = self.total_qualities
-            .iter()
-            .zip(self.counts.iter())
-            .map(|(&sum, &count)| {
-                if count > 0 {
-                    sum / count as f64
+        let gc_per_position: Vec<f64> = self.gc_counts.iter()
+            .zip(self.total_counts.iter())
+            .map(|(&gc, &total)| {
+                if total > 0 {
+                    gc as f64 / total as f64
                 } else {
                     0.0
                 }
             })
             .collect();
-
-        serde_json::json!({
-            "average_base_quality_per_position": averages
+    
+        json!({
+            "average_gc_content_per_position": gc_per_position
         })
     }
 }
 
-/// Computes mean base quality for a read.
+/// 5. average G/C content per read
+/// --> GC-Gehalt (pro Sequenz)
 #[derive(Default)]
-pub struct ReadQualityStatistic {
-    pub total_quality: f64,
-    pub read_count: usize,
+pub struct GcContentPerRead {
+    gc_percent: f64, 
+    counts: usize,
 }
 
-// impl Default for ReadQualityStatistic {
-//     fn default() -> Self {
-//         Self {
-//             total_quality: 0.0,
-//             read_count: 0, 
-//         }
-//     }
-// } 
-//derive
-
-impl Statistic for ReadQualityStatistic {
+impl Statistic for GcContentPerRead {
     fn process(&mut self, record: &FastqRecord) {
-        let read_quality: f64 = record.qual
-            .iter()
-            .map(|&q| (q - 33) as f64)
-            .sum::<f64>() / record.qual.len() as f64;
+        let gc_count = record.seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
+        let len = record.seq.len();
 
-        self.total_quality += read_quality;
-        self.read_count += 1;
+        if len > 0 {
+            let fraction = gc_count as f64 / len as f64;
+            self.gc_percent += fraction;
+            self.counts += 1;
+        }
+        
     }
 }
 
-impl Report for ReadQualityStatistic {
+impl Report for GcContentPerRead {
     fn report_json(&self) -> serde_json::Value {
-        let average = if self.read_count > 0 {
-            self.total_quality / self.read_count as f64
+        let average_gc = if self.counts > 0 {
+            self.gc_percent / self.counts as f64
         } else {
             0.0
         };
 
         json!({
-            "average_read_quality": average
+            "average_gc_content_per_read": average_gc
+        })
+    }
+}
+
+/// 6. distribution of lengths of the individual reads
+/// --> Längenverteilung (Anzahl und Prozent)
+#[derive(Default)]
+pub struct ReadLengthDistribution {
+    lengths: BTreeMap<usize, usize>, // Read length → count
+    total: usize,
+}
+
+impl Statistic for ReadLengthDistribution {
+    fn process(&mut self, record: &FastqRecord) {
+        let len = record.seq.len();
+        *self.lengths.entry(len).or_insert(0) += 1;
+        self.total += 1;
+    }
+}
+
+impl Report for ReadLengthDistribution {
+    fn report_json(&self) -> serde_json::Value {
+        let mut result = serde_json::Map::new();
+
+        for (length, count) in &self.lengths {
+            let percent = (*count as f64) / (self.total as f64);
+            result.insert(
+                length.to_string(),
+                json!({
+                    "count": count,
+                    "percent": percent
+                }),
+            );
+        }
+
+        json!({
+            "read_length_distribution": result
         })
     }
 }
@@ -432,7 +371,7 @@ pub enum StatisticType {
     BaseComposition,
     GcContentPos,
     GcContentRead,
-    BaseCompositionRead,
+    ReadLength,
 }
 
 impl WorkflowRunner { // Default ?
@@ -465,7 +404,7 @@ impl WorkflowRunner { // Default ?
                 StatisticType::BaseComposition => Self::wrap(BaseCompositionStatistic::default()),
                 StatisticType::GcContentPos => Self::wrap(GcContentPerPosition::default()),
                 StatisticType::GcContentRead => Self::wrap(GcContentPerRead::default()),
-                StatisticType::BaseCompositionRead => Self::wrap(BaseCompositionPerRead::default()),
+                StatisticType::ReadLength => Self::wrap(ReadLengthDistribution::default()),
             })
             .collect();
 
@@ -481,7 +420,7 @@ impl WorkflowRunner { // Default ?
             WorkflowRunner::wrap(BaseCompositionStatistic::default()),
             WorkflowRunner::wrap(GcContentPerPosition::default()),
             WorkflowRunner::wrap(GcContentPerRead::default()),
-            WorkflowRunner::wrap(BaseCompositionPerRead::default()),            
+            WorkflowRunner::wrap(ReadLengthDistribution::default()),            
         ];
 
         runner

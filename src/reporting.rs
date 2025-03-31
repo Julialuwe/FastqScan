@@ -39,6 +39,17 @@ pub struct PositionRow {
     pub n: DisplayableF64,
 }
 
+#[derive(Tabled)]
+pub struct LengthRow {
+    #[tabled(rename = "Length")]
+    pub length: String,
+    #[tabled(rename = "Count")]
+    pub count: String,
+    #[tabled(rename = "Percent")]
+    pub percent: String,
+}
+
+
 /// Main function to print combined table
 pub fn print_combined_table(json: &Value) {
     let base_q = json.get("average_base_quality_per_position").and_then(|v| v.as_array());
@@ -103,4 +114,31 @@ pub fn print_combined_table(json: &Value) {
     println!("\nStatistics Table:\n");
     println!("{table}");
 
+}
+
+pub fn print_length_distribution(json: &Value) {
+    if let Some(dist) = json.get("read_length_distribution").and_then(|v| v.as_object()) {
+        let mut rows = Vec::new();
+
+        let mut lengths: Vec<_> = dist.iter().collect();
+        lengths.sort_by_key(|(k, _)| k.parse::<usize>().unwrap_or(0)); // Sortieren nach numerischer Länge
+
+        for (len, val) in lengths {
+            let count = val.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let percent = val.get("percent").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            rows.push(LengthRow {
+                length: len.clone().cyan().to_string(),
+                count: count.to_string(),
+                percent: format!("{:.2}%", percent * 100.0),
+            });
+        }
+
+        let mut table = Table::new(rows);
+        table
+            .with(Style::modern())
+            .with(Modify::new(Segment::all()).with(Format::content(|s| s.to_string())));
+
+        println!("\nRead Length Distribution:\n");
+        println!("{table}");
+    }
 }

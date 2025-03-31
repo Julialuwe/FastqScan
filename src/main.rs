@@ -45,7 +45,7 @@ fn main() {
     StatisticType::BaseComposition,
     StatisticType::GcContentPos,
     StatisticType::GcContentRead,
-    StatisticType::BaseCompositionRead,
+    StatisticType::ReadLength,
     ];
 
     for reader in readers {
@@ -69,7 +69,9 @@ fn main() {
         }
 
         //println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
-        reporting::print_combined_table(&Value::Object(json_output));
+        reporting::print_combined_table(&Value::Object(json_output.clone()));
+        reporting::print_length_distribution(&Value::Object(json_output.clone()));
+
         println!("Parsing of File done!");
     }
 
