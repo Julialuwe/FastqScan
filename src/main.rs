@@ -1,16 +1,15 @@
 mod cli;
 mod runner;
 mod io_utils;
+mod reporting;
 
-use std::fs::File;
-use std::io::BufReader;
 use clap::Parser;
 use cli::CliArgs;
-use runner::{BaseCompositionStatistic, BaseQualityPosStatistic, FastqRecord, GcContentPerPosition, ReadQualityStatistic, WorkflowRunner};
+use runner::WorkflowRunner;
 use io_utils::open_fastq;
+use serde_json::{json, Value};
 use std::process;
-use std::any::Any;
-use serde_json::json;
+
 
 fn main() {
     let args = CliArgs::parse();
@@ -25,11 +24,7 @@ fn main() {
     };
 
     // init Runner and register statistics 
-    let mut runner = WorkflowRunner::new();
-    //runner.statistics.push(Box::new(ReadQualityStatistic::default()));
-    //runner.statistics.push(Box::new(BaseQualityPosStatistic::default()));
-    //runner.statistics.push(Box::new(BaseCompositionStatistic::default()));
-    runner.statistics.push(Box::new(GcContentPerPosition::default()));
+    let mut runner = WorkflowRunner::with_default_statistics();
 
 
     // Processing File 1 
@@ -52,8 +47,8 @@ fn main() {
     let stats = runner.finalize();
     let mut json_output = serde_json::Map::new();
 
-    for stat in stats {
-        let value = stat.report_json();
+    for wrapper in stats {
+        let value = wrapper.reporter.report_json();
         if let Some(obj) = value.as_object() {
             for (k, v) in obj {
                 json_output.insert(k.clone(), v.clone());
@@ -61,7 +56,8 @@ fn main() {
         }
     }
 
-    println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+
+    reporting::print_combined_table(&Value::Object(json_output));
 
 
     println!("Parsing done!");

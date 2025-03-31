@@ -1,13 +1,58 @@
 use std::{default, io::{self, BufRead}};
 
 use flate2::read;
-use std::any::Any;
 use serde_json::json;
+use std::rc::Rc;
+use std::cell::RefCell;
+
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FastqRecord {
     seq: Vec<u8>,
     qual: Vec<u8>,
+}
+
+
+/* 
+wrapper structs:
+- allow sharing single instance of a statistic for Statistics and Report
+- without duplicating the underlying data
+//
+- Statistic::process` requires mutable access  
+- `Report::report_json` requires shared (immutable) access
+--> `Rc<RefCell<T>>` to enable interior mutability and shared ownership
+        - `Rc` (Reference Counted) enables multiple owners of the same data
+        - `RefCell` allows mutable access even through a shared reference (`&self`) at runtime
+        - checked safely by Rust’s borrow rules
+
+--> `RcStatistic<T>` wraps shared statistic for usage as a `Statistic`
+        - calling `process()` via `borrow_mut()`
+
+--> `RcReporter<T>` wraps the same shared statistic so it can be used as a `Report`,
+        -calling `report_json()` via `borrow()`.
+
+This  allows WorkflowRunner to treat `Statistic` and `Report` as separate
+traits while internally using only one instance of each concrete statistic type.
+*/ 
+
+pub struct RcStatistic<T: Statistic>(Rc<RefCell<T>>);
+impl<T: Statistic> Statistic for RcStatistic<T> {
+    fn process(&mut self, record: &FastqRecord) {
+        self.0.borrow_mut().process(record);
+    }
+}
+
+pub struct RcReporter<T: Report>(Rc<RefCell<T>>);
+impl<T: Report> Report for RcReporter<T> {
+    fn report_json(&self) -> serde_json::Value {
+        self.0.borrow().report_json()
+    }
+}
+
+
+pub struct StatisticWrapper {
+    pub statistic: Box<dyn Statistic>,
+    pub reporter: Box<dyn Report>,
 }
 
 pub trait Statistic {
@@ -19,8 +64,6 @@ pub trait Statistic {
      */
 
     fn process(&mut self, record: &FastqRecord);
-    fn as_any(&self) -> &dyn Any;
-    fn report_json(&self) -> serde_json::Value;
 
 
     // TODO - find a way to represent the results.
@@ -28,6 +71,105 @@ pub trait Statistic {
     // and report these in some fashion.
     // fn report(self) -> ?
 }
+
+pub trait Report {
+    fn report_json(&self) -> serde_json::Value;
+}
+
+
+/// Conputes distribution of lengths of the individual reads
+pub struct BaseCompositionPerRead {
+    total_counts: [f64; 5],
+    read_count: usize,
+}
+
+impl Statistic for BaseCompositionPerRead {
+    fn process(&mut self, record: &FastqRecord) {
+        let mut counts = [0usize; 5];
+        for &base in &record.seq {
+            let idx = match base {
+                b'A' => 0,
+                b'C' => 1,
+                b'G' => 2,
+                b'T' => 3,
+                _ => 4, // N or other
+            };
+            counts[idx] += 1;
+        }
+
+        let len = record.seq.len();
+        if len > 0 {
+            for i in 0..5 {
+                self.total_counts[i] += counts[i] as f64 / len as f64;
+            }
+            self.read_count += 1;
+        }
+    }
+}
+
+impl Report for BaseCompositionPerRead {
+    fn report_json(&self) -> serde_json::Value {
+        let bases = ["A", "C", "G", "T", "N"];
+        let mut composition = serde_json::Map::new();
+
+        for (i, &base) in bases.iter().enumerate() {
+            let avg = if self.read_count > 0 {
+                self.total_counts[i] / self.read_count as f64
+            } else {
+                0.0
+            };
+            composition.insert(base.to_string(), json!(avg));
+        }
+
+        json!({
+            "average_base_composition_per_read": composition
+        })
+    }
+}
+
+/// Computes average G/C content per read position
+pub struct GcContentPerRead {
+    gc_percent: f64, 
+    counts: usize,
+}
+
+impl Default for GcContentPerRead {
+    fn default() -> Self {
+        Self { 
+            gc_percent: 0.0,
+            counts: 0,
+        }
+    }
+}
+
+impl Statistic for GcContentPerRead {
+    fn process(&mut self, record: &FastqRecord) {
+        let gc_count = record.seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
+        let len = record.seq.len();
+
+        if len > 0 {
+            let fraction = gc_count as f64 / len as f64;
+            self.gc_percent += fraction;
+            self.counts += 1;
+        }
+        
+    }
+}
+
+impl Report for GcContentPerRead {
+    fn report_json(&self) -> serde_json::Value {
+        let average_gc = if self.counts > 0 {
+            self.gc_percent / self.counts as f64
+        } else {
+            0.0
+        };
+
+        json!({
+            "average_gc_content_per_read": average_gc
+        })
+    }
+}
+
 
 /// Computes average G/C content per read position
 pub struct GcContentPerPosition {
@@ -60,11 +202,9 @@ impl Statistic for GcContentPerPosition {
             self.total_counts[i] += 1;
         }
     }
+}
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
+impl Report for GcContentPerPosition {
     fn report_json(&self) -> serde_json::Value {
         let gc_per_position: Vec<f64> = self.gc_counts.iter()
             .zip(self.total_counts.iter())
@@ -81,8 +221,8 @@ impl Statistic for GcContentPerPosition {
             "average_gc_content_per_position": gc_per_position
         })
     }
-    
 }
+
 /// Computes average proportions of {A, C, G, T, N} for each read position
 pub struct BaseCompositionStatistic {
     base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
@@ -114,11 +254,9 @@ impl Statistic for BaseCompositionStatistic {
             self.base_counts[i][idx] += 1;
         }
     }
+}
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
+impl Report for BaseCompositionStatistic {
     fn report_json(&self) -> serde_json::Value {
         let proportions: Vec<_> = self.base_counts.iter().map(|counts| {
             let total: usize = counts.iter().sum();
@@ -140,7 +278,6 @@ impl Statistic for BaseCompositionStatistic {
         })
     }
 }
-
 
 
 
@@ -174,11 +311,9 @@ impl Statistic for BaseQualityPosStatistic {
             self.counts[i] += 1;
         }
     }
+}
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
+impl Report for BaseQualityPosStatistic {
     fn report_json(&self) -> serde_json::Value {
         let averages: Vec<f64> = self.total_qualities
             .iter()
@@ -197,8 +332,6 @@ impl Statistic for BaseQualityPosStatistic {
         })
     }
 }
-
-
 
 /// Computes mean base quality for a read.
 pub struct ReadQualityStatistic {
@@ -225,11 +358,9 @@ impl Statistic for ReadQualityStatistic {
         self.total_quality += read_quality;
         self.read_count += 1;
     }
+}
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
+impl Report for ReadQualityStatistic {
     fn report_json(&self) -> serde_json::Value {
         let average = if self.read_count > 0 {
             self.total_quality / self.read_count as f64
@@ -243,9 +374,8 @@ impl Statistic for ReadQualityStatistic {
     }
 }
 
-
 pub struct WorkflowRunner {
-    pub statistics: Vec<Box<dyn Statistic>>,
+    pub statistics: Vec<StatisticWrapper>,
 }
 
 impl WorkflowRunner {
@@ -257,6 +387,49 @@ impl WorkflowRunner {
             statistics: Vec::new(),
         }
     }
+    
+    pub fn with_default_statistics() -> Self {
+        let mut runner = Self::new();
+
+        fn wrap<T: 'static + Statistic + Report>(instance: T) -> StatisticWrapper {
+            let shared = Rc::new(RefCell::new(instance));
+            StatisticWrapper {
+                statistic: Box::new(RcStatistic(shared.clone())),
+                reporter: Box::new(RcReporter(shared)),
+            }
+        }
+
+        runner.statistics = vec![
+            wrap(ReadQualityStatistic {
+                total_quality: 0.0,
+                read_count: 0,
+            }),
+            wrap(BaseQualityPosStatistic {
+                total_qualities: Vec::new(),
+                counts: Vec::new(),
+            }),
+            wrap(BaseCompositionStatistic {
+                base_counts: Vec::new(),
+            }),
+            wrap(GcContentPerPosition {
+                gc_counts: Vec::new(),
+                total_counts: Vec::new(),
+            }),
+            wrap(GcContentPerRead {
+                gc_percent: 0.0,
+                counts: 0,
+            }),
+            wrap(BaseCompositionPerRead {
+                total_counts: [0.0; 5],
+                read_count: 0,
+            }),            
+        ];
+
+        runner
+    }
+
+
+    
     pub fn process<R>(&mut self, mut read: R)
     where
         R: BufRead,
@@ -264,8 +437,8 @@ impl WorkflowRunner {
         let mut record = FastqRecord::default();
 
         while let Ok(()) = WorkflowRunner::parse_record(&mut read, &mut record) {
-            for statistic in self.statistics.iter_mut() {
-                statistic.process(&record);
+            for wrapper in self.statistics.iter_mut() {
+                wrapper.statistic.process(&record);
             }
         }
     }
@@ -290,7 +463,7 @@ impl WorkflowRunner {
         }
         record.seq = buffer.trim_end().as_bytes().to_vec();
 
-        // Line 3 --> +
+        // Line 3 --> + (ignoring for now)
         buffer.clear();
         if read.read_line(&mut buffer)? == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF before + line"));
@@ -306,7 +479,7 @@ impl WorkflowRunner {
         Ok(())
     }
 
-    pub fn finalize(self) -> Vec<Box<dyn Statistic>> {
+    pub fn finalize(self) -> Vec<StatisticWrapper> {
         // Move out the statistics, effectively preventing the future use of the runner.
         self.statistics
     }
