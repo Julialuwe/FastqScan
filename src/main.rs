@@ -56,7 +56,10 @@ fn main() {
         }
     }
 
+    println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
 
+
+    //still missing: json output into file
     reporting::print_combined_table(&Value::Object(json_output));
 
 
