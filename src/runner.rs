@@ -11,8 +11,45 @@ pub struct FastqRecord {
     qual: Vec<u8>,
 }
 
-
 /* 
+trait Report {
+
+    fn report(&self);
+}
+
+trait Accumulate {
+    fn accumulate(&self);
+}
+
+struct A;
+
+impl Report for A {
+    fn report(&self) {
+        todo!()
+    }
+}
+impl Accumulate for A {
+    fn accumulate(&self) {
+        todo!()
+    }
+}
+
+fn outer () {
+    let a = A;
+
+    let bla = Box::new(a);
+    bla.report();
+    bla.accumulate();
+    let after = inner(bla);
+    after.report();
+    after.accumulate();
+}
+
+fn inner(val: Box<dyn Report>) -> Box<dyn Report> {
+    val
+}
+
+
 wrapper structs:
 - allow sharing single instance of a statistic for Statistics and Report
 - without duplicating the underlying data
@@ -74,11 +111,21 @@ pub trait Report {
 }
 
 
-/// Conputes distribution of lengths of the individual reads
+/// Conputes distribution of lengths of the individual reads (similar to BaseCompositionStatistics)
+
 pub struct BaseCompositionPerRead {
     total_counts: [f64; 5],
     read_count: usize,
 }
+
+impl Default for BaseCompositionPerRead {
+    fn default() -> Self {
+        Self {
+            total_counts: [0.0; 5],
+            read_count: 0, 
+        }
+    }
+} 
 
 impl Statistic for BaseCompositionPerRead {
     fn process(&mut self, record: &FastqRecord) {
@@ -130,6 +177,15 @@ pub struct GcContentPerRead {
     counts: usize,
 }
 
+impl Default for GcContentPerRead {
+    fn default() -> Self {
+        Self {
+            gc_percent: 0.0,
+            counts: 0, 
+        }
+    }
+} 
+
 impl Statistic for GcContentPerRead {
     fn process(&mut self, record: &FastqRecord) {
         let gc_count = record.seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
@@ -165,6 +221,15 @@ pub struct GcContentPerPosition {
     total_counts: Vec<usize>,
 }
 
+impl Default for GcContentPerPosition {
+    fn default() -> Self {
+        Self {
+            gc_counts: Vec::new(),
+            total_counts: Vec::new(), 
+        }
+    }
+} 
+    
 
 impl Statistic for GcContentPerPosition {
     fn process(&mut self, record: &FastqRecord) {
@@ -206,6 +271,14 @@ impl Report for GcContentPerPosition {
 /// Computes average proportions of {A, C, G, T, N} for each read position
 pub struct BaseCompositionStatistic {
     base_counts: Vec<[usize; 5]>, // A,C,G,T,N → 0–4
+}
+
+impl Default for BaseCompositionStatistic {
+    fn default() -> Self {
+        Self {
+            base_counts: Vec::new(),
+        }
+    }
 }
 
 impl Statistic for BaseCompositionStatistic {
@@ -259,6 +332,15 @@ pub struct BaseQualityPosStatistic {
     pub counts: Vec<usize>,
 }
 
+impl Default for BaseQualityPosStatistic {
+    fn default() -> Self {
+        Self {
+            total_qualities: Vec::new(),
+            counts: Vec::new(), 
+        }
+    }
+} 
+
 impl Statistic for BaseQualityPosStatistic {
     fn process(&mut self, record: &FastqRecord) {
         let len = record.qual.len();
@@ -297,11 +379,21 @@ impl Report for BaseQualityPosStatistic {
 }
 
 /// Computes mean base quality for a read.
+#[derive(Default)]
 pub struct ReadQualityStatistic {
     pub total_quality: f64,
     pub read_count: usize,
 }
 
+// impl Default for ReadQualityStatistic {
+//     fn default() -> Self {
+//         Self {
+//             total_quality: 0.0,
+//             read_count: 0, 
+//         }
+//     }
+// } 
+//derive
 
 impl Statistic for ReadQualityStatistic {
     fn process(&mut self, record: &FastqRecord) {
@@ -333,7 +425,7 @@ pub struct WorkflowRunner {
     pub statistics: Vec<StatisticWrapper>,
 }
 
-impl WorkflowRunner {
+impl WorkflowRunner { // Default ?
     /// Process the FASTQ file.
     ///
     /// Can return an I/O error or other errors (not in the signature at this point)
@@ -343,41 +435,24 @@ impl WorkflowRunner {
         }
     }
     
+    fn wrap<T: 'static + Statistic + Report>(instance: T) -> StatisticWrapper {
+        let shared = Rc::new(RefCell::new(instance));
+        StatisticWrapper {
+            statistic: Box::new(RcStatistic(shared.clone())),
+            reporter: Box::new(RcReporter(shared)),
+        }
+    }
+
     pub fn with_default_statistics() -> Self {
         let mut runner = Self::new();
 
-        fn wrap<T: 'static + Statistic + Report>(instance: T) -> StatisticWrapper {
-            let shared = Rc::new(RefCell::new(instance));
-            StatisticWrapper {
-                statistic: Box::new(RcStatistic(shared.clone())),
-                reporter: Box::new(RcReporter(shared)),
-            }
-        }
-
         runner.statistics = vec![
-            wrap(ReadQualityStatistic {
-                total_quality: 0.0,
-                read_count: 0,
-            }),
-            wrap(BaseQualityPosStatistic {
-                total_qualities: Vec::new(),
-                counts: Vec::new(),
-            }),
-            wrap(BaseCompositionStatistic {
-                base_counts: Vec::new(),
-            }),
-            wrap(GcContentPerPosition {
-                gc_counts: Vec::new(),
-                total_counts: Vec::new(),
-            }),
-            wrap(GcContentPerRead {
-                gc_percent: 0.0,
-                counts: 0,
-            }),
-            wrap(BaseCompositionPerRead {
-                total_counts: [0.0; 5],
-                read_count: 0,
-            }),            
+            WorkflowRunner::wrap(ReadQualityStatistic::default()),
+            WorkflowRunner::wrap(BaseQualityPosStatistic::default()),
+            WorkflowRunner::wrap(BaseCompositionStatistic::default()),
+            WorkflowRunner::wrap(GcContentPerPosition::default()),
+            WorkflowRunner::wrap(GcContentPerRead::default()),
+            WorkflowRunner::wrap(BaseCompositionPerRead::default()),            
         ];
 
         runner
